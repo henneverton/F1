@@ -1,15 +1,109 @@
 # F1 — Top 5 voltas mais rápidas
 
-Dashboard Streamlit que mostra, para a pista e sessão selecionadas, as cinco
-voltas válidas mais rápidas registadas na [OpenF1 API](https://openf1.org/docs/).
+Dashboard web local, construído com [Streamlit](https://streamlit.io/), que mostra as **cinco
+voltas válidas mais rápidas** de uma pista e sessão de Fórmula 1 selecionadas pelo utilizador.
+Os dados vêm da [OpenF1 API](https://openf1.org/docs/), um projeto não oficial e sem afiliação
+com a Fórmula 1.
 
-## Como executar
+## Funcionalidades
+
+- Filtros em cascata na barra lateral: época → pista/Grande Prémio → sessão.
+- Tabela com posição, piloto, equipa, número, volta, tempo formatado (`m:ss.mmm`) e tempos de
+  setor quando disponíveis.
+- Gráfico de barras horizontais comparando as cinco voltas mais rápidas.
+- Estados claros de carregamento, lista vazia e erro da API.
+
+## Requisitos
+
+- [pyenv](https://github.com/pyenv/pyenv) para a versão do Python (`3.14.5`, ver
+  `.python-version`).
+- [Poetry](https://python-poetry.org/) para dependências e ambiente virtual.
+
+O projeto usa **exclusivamente** pyenv + Poetry. Não use `pip`, `venv`, `virtualenv` nem
+`requirements.txt`.
+
+## Instalação rápida
 
 ```bash
+pyenv install 3.14.5
+pyenv local 3.14.5
+poetry env use "$(pyenv which python)"
 poetry install
+```
+
+Em PowerShell, o último comando é `poetry env use (pyenv which python)`.
+
+`poetry install` cria a virtualenv automaticamente e instala as dependências de produção
+(`httpx`, `streamlit`) e de desenvolvimento (`ruff`, `pytest`, `pytest-cov`, `mkdocs-material`,
+`taskipy`). Não é necessária nenhuma chave de API — os dados históricos da OpenF1 são gratuitos
+e não exigem autenticação.
+
+Guia completo: [docs/instalacao.md](docs/instalacao.md).
+
+## Executar o dashboard
+
+```bash
 poetry run streamlit run src/f1/app.py
 ```
 
-Consulte [CODEX/plan.md](CODEX/plan.md) para o plano de implementação e
-[docs/](docs/) para a documentação completa (instalação, uso e regras do
-ranking), publicada com MkDocs Material.
+O Streamlit abre o dashboard no navegador (por omissão em `http://localhost:8501`).
+
+## Estrutura do projeto
+
+```text
+src/f1/
+├── __init__.py
+├── app.py             # Ponto de entrada Streamlit
+├── models.py           # Dataclasses de domínio
+├── openf1_client.py    # Cliente HTTP da OpenF1 API
+└── ranking.py           # Regras de ranking das voltas mais rápidas
+tests/
+├── fixtures/            # Respostas simuladas da OpenF1 API
+├── test_openf1_client.py
+├── test_ranking.py
+└── test_app.py
+docs/                    # Documentação (mkdocs-material)
+mkdocs.yml
+```
+
+## Comandos de desenvolvimento
+
+Via [taskipy](https://github.com/taskipy/taskipy) (`poetry run task <nome>`) ou diretamente:
+
+| Comando                      | Equivale a                                            |
+| ----------------------------- | ------------------------------------------------------ |
+| `poetry run task lint`        | `ruff check .`                                          |
+| `poetry run task format`      | `ruff format .`                                         |
+| `poetry run task test`        | `pytest`                                                |
+| `poetry run task cov`         | `pytest --cov=src/f1 --cov-report=term-missing`         |
+| `poetry run task docs`        | `mkdocs serve`                                          |
+| `poetry run task docs-build`  | `mkdocs build --strict`                                 |
+| `poetry run task run`         | `streamlit run src/f1/app.py`                           |
+
+Testes nunca chamam a OpenF1 API real: `test_openf1_client.py` usa `httpx.MockTransport`,
+`test_ranking.py` testa a função pura de ranking com dados em memória, e `test_app.py` usa
+`streamlit.testing.v1.AppTest` com o `OpenF1Client` simulado via `monkeypatch`. A cobertura
+mínima exigida sobre `src/f1` é de 50%.
+
+## Checklist antes do Pull Request
+
+```bash
+poetry run ruff check .
+poetry run ruff format --check .
+poetry run pytest
+poetry run pytest --cov=src/f1 --cov-report=term-missing
+poetry run mkdocs build --strict
+```
+
+## Documentação
+
+- [docs/index.md](docs/index.md) — visão geral e navegação.
+- [docs/instalacao.md](docs/instalacao.md) — ambiente com pyenv e Poetry.
+- [docs/uso-do-dashboard.md](docs/uso-do-dashboard.md) — como usar o dashboard.
+- [docs/regras-do-ranking.md](docs/regras-do-ranking.md) — critérios de validade e desempate.
+- [docs/desenvolvimento.md](docs/desenvolvimento.md) — guia completo de desenvolvimento.
+
+## Aviso legal
+
+A OpenF1 é um projeto não oficial, independente e sem qualquer associação com as empresas de
+Fórmula 1.
