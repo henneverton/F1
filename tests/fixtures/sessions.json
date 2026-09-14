@@ -1,0 +1,16 @@
+[
+  {
+    "session_key": 9165,
+    "meeting_key": 1219,
+    "session_name": "Practice 1",
+    "session_type": "Practice",
+    "date_start": "2026-10-02T09:30:00+00:00"
+  },
+  {
+    "session_key": 9168,
+    "meeting_key": 1219,
+    "session_name": "Race",
+    "session_type": "Race",
+    "date_start": "2026-10-04T12:00:00+00:00"
+  }
+]
