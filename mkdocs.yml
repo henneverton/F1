@@ -1,0 +1,21 @@
+site_name: F1 — Top 5 voltas mais rápidas
+site_description: Dashboard Streamlit com o ranking das voltas mais rápidas por pista e sessão, usando a OpenF1 API.
+repo_name: everton/f1
+theme:
+  name: material
+  language: pt
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+nav:
+  - Início: index.md
+  - Instalação: instalacao.md
+  - Uso do dashboard: uso-do-dashboard.md
+  - Regras do ranking: regras-do-ranking.md
+  - Desenvolvimento: desenvolvimento.md

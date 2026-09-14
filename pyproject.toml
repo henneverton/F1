@@ -1,0 +1,63 @@
+[project]
+name = "f1"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Everton Henn",email = "everton2803@hotmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.14,<4.0"
+dependencies = [
+    "httpx (>=0.28.1,<0.29.0)",
+    "streamlit (>=1.63.0,<2.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "f1", from = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.1.1,<10.0.0)",
+    "pytest-cov (>=7.1.0,<8.0.0)",
+    "ruff (>=0.16.7,<0.17.0)",
+    "mkdocs-material (>=9.7.7,<10.0.0)",
+    "taskipy (>=1.14.1,<2.0.0)"
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --cov=src/f1 --cov-report=term-missing --cov-fail-under=50"
+
+[tool.coverage.run]
+branch = true
+source = ["src/f1"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.taskipy.tasks]
+lint = "ruff check ."
+format = "ruff format ."
+test = "pytest"
+cov = "pytest --cov=src/f1 --cov-report=term-missing"
+docs = "mkdocs serve"
+docs-build = "mkdocs build --strict"
+run = "streamlit run src/f1/app.py"

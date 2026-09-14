@@ -1,0 +1,18 @@
+[
+  {
+    "meeting_key": 1219,
+    "meeting_name": "Singapore Grand Prix",
+    "circuit_short_name": "Singapore",
+    "country_name": "Singapore",
+    "year": 2026,
+    "date_start": "2026-10-02T09:30:00+00:00"
+  },
+  {
+    "meeting_key": 1220,
+    "meeting_name": "Japanese Grand Prix",
+    "circuit_short_name": "Suzuka",
+    "country_name": "Japan",
+    "year": 2026,
+    "date_start": "2026-04-05T02:00:00+00:00"
+  }
+]
