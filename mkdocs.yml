@@ -1,6 +1,8 @@
 site_name: F1 — Top 5 voltas mais rápidas
 site_description: Dashboard Streamlit com o ranking das voltas mais rápidas por pista e sessão, usando a OpenF1 API.
-repo_name: everton/f1
+site_url: https://henneverton.github.io/F1/
+repo_name: henneverton/F1
+repo_url: https://github.com/henneverton/F1
 theme:
   name: material
   language: pt
