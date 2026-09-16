@@ -90,6 +90,15 @@ def test_empty_result_returns_empty_list():
     assert client.get_meetings(1900) == []
 
 
+def test_not_found_returns_empty_list():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "No results found."})
+
+    client = _client_with_handler(handler)
+
+    assert client.get_laps(9168) == []
+
+
 def test_http_error_raises_openf1_http_error():
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="internal error")
