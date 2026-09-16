@@ -2,18 +2,53 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import altair as alt
 import pandas as pd
 import streamlit as st
 
 from f1.geo import build_calendar_map
-from f1.models import Meeting, RankedLap
+from f1.models import Driver, Meeting, RankedLap, Session, SessionResult
 from f1.openf1_client import OpenF1Client, OpenF1Error
-from f1.ranking import rank_fastest_laps
+from f1.ranking import rank_fastest_laps, tally_wins
+from f1.theme import CUSTOM_CSS, SIDEBAR_CAR_SVG
 
 MIN_YEAR = 2023
 CURRENT_YEAR = 2026
 ALL_COUNTRIES_OPTION = "Todos os países"
+SESSION_TYPES: list[tuple[str, str]] = [
+    ("Race", "Corrida"),
+    ("Qualifying", "Qualificação"),
+    ("Practice", "Treino Livre"),
+]
+SESSION_TYPE_LABELS = dict(SESSION_TYPES)
+
+LAPS_COLUMN_CONFIG = {
+    "position": st.column_config.NumberColumn("Pos."),
+    "label": None,
+    "driver_name": st.column_config.TextColumn("Piloto"),
+    "team_name": st.column_config.TextColumn("Equipa"),
+    "driver_number": st.column_config.NumberColumn("Número"),
+    "lap_number": st.column_config.NumberColumn("Volta"),
+    "lap_duration": None,
+    "lap_duration_formatted": st.column_config.TextColumn("Tempo"),
+    "sector_1": st.column_config.TextColumn("Setor 1"),
+    "sector_2": st.column_config.TextColumn("Setor 2"),
+    "sector_3": st.column_config.TextColumn("Setor 3"),
+}
+
+
+@dataclass
+class TrackData:
+    """Dados de uma pista já carregados para a sessão/tipo escolhidos."""
+
+    meeting: Meeting
+    session: Session | None = None
+    drivers: list[Driver] = field(default_factory=list)
+    session_results: list[SessionResult] = field(default_factory=list)
+    ranked_laps: list[RankedLap] = field(default_factory=list)
+    error: str | None = None
 
 
 @st.cache_resource
@@ -39,6 +74,11 @@ def load_drivers(session_key: int):
 @st.cache_data(ttl="5m")
 def load_laps(session_key: int):
     return get_client().get_laps(session_key)
+
+
+@st.cache_data(ttl="5m")
+def load_session_results(session_key: int):
+    return get_client().get_session_results(session_key)
 
 
 def _format_sector(value: float | None) -> str:
@@ -74,11 +114,51 @@ def meetings_to_dataframe(meetings: list[Meeting]) -> pd.DataFrame:
     )
 
 
-def default_session_index(sessions: list) -> int:
-    for index, session in enumerate(sessions):
-        if session.session_type.lower() == "race":
-            return index
-    return 0
+def find_session_by_type(sessions: list[Session], session_type: str) -> Session | None:
+    """Devolve a sessão mais recente do tipo indicado, ou `None` se não existir."""
+
+    matches = [s for s in sessions if s.session_type.lower() == session_type.lower()]
+    if not matches:
+        return None
+    return max(matches, key=lambda s: s.date_start or "")
+
+
+def load_track_data(meeting: Meeting, session_type: str) -> TrackData:
+    """Carrega sessão, pilotos, classificação e voltas de uma pista, sem levantar exceções."""
+
+    try:
+        sessions = load_sessions(meeting.meeting_key)
+    except OpenF1Error as exc:
+        return TrackData(meeting=meeting, error=str(exc))
+
+    session = find_session_by_type(sessions, session_type)
+    if session is None:
+        return TrackData(meeting=meeting)
+
+    try:
+        drivers = load_drivers(session.session_key)
+        laps = load_laps(session.session_key)
+        session_results = load_session_results(session.session_key)
+    except OpenF1Error as exc:
+        return TrackData(meeting=meeting, session=session, error=str(exc))
+
+    return TrackData(
+        meeting=meeting,
+        session=session,
+        drivers=drivers,
+        session_results=session_results,
+        ranked_laps=rank_fastest_laps(laps, drivers),
+    )
+
+
+def top_drivers_to_dataframe(top_drivers) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "driver_name": [d.driver_name for d in top_drivers],
+            "team_name": [d.team_name for d in top_drivers],
+            "wins": [d.wins for d in top_drivers],
+        }
+    )
 
 
 st.set_page_config(
@@ -87,12 +167,15 @@ st.set_page_config(
     layout="wide",
 )
 
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
 st.title("Top 5 voltas mais rápidas")
 st.caption(
     "Dados históricos da OpenF1 API (gratuitos desde 2023, sem necessidade de autenticação)."
 )
 
 with st.sidebar:
+    st.markdown(SIDEBAR_CAR_SVG, unsafe_allow_html=True)
     st.header("Filtros")
     year = st.selectbox("Época", options=list(range(CURRENT_YEAR, MIN_YEAR - 1, -1)))
 
@@ -110,6 +193,11 @@ countries = sorted({m.country_name for m in meetings if m.country_name})
 
 with st.sidebar:
     country_filter = st.selectbox("País", options=[ALL_COUNTRIES_OPTION, *countries])
+    session_type = st.selectbox(
+        "Tipo de sessão",
+        options=[key for key, _ in SESSION_TYPES],
+        format_func=lambda key: SESSION_TYPE_LABELS[key],
+    )
 
 filtered_meetings = (
     meetings
@@ -122,21 +210,60 @@ if not filtered_meetings:
     st.info("Não há Grandes Prémios registados para este país nesta época.")
     st.stop()
 
-meetings_by_label = {f"{m.meeting_name} — {m.country_name}": m for m in filtered_meetings}
+with st.spinner("A carregar dados de todas as pistas…"):
+    tracks_data = [load_track_data(meeting, session_type) for meeting in filtered_meetings]
 
-with st.sidebar:
-    meeting_label = st.selectbox("Pista / Grande Prémio", options=list(meetings_by_label))
-
-selected_meeting = meetings_by_label[meeting_label]
-
-with st.container(border=True):
+with st.container(border=True, key="map_card"):
     st.markdown("**Mapa do calendário**")
+    highlighted_country = country_filter if country_filter != ALL_COUNTRIES_OPTION else None
     st.altair_chart(
-        build_calendar_map([m.country_name for m in meetings], selected_meeting.country_name),
+        build_calendar_map([m.country_name for m in meetings], highlighted_country),
         width="stretch",
     )
 
-with st.container(border=True):
+with st.container(border=True, key="top_drivers_card"):
+    st.markdown("**Top 3 pilotos**")
+    scope_label = country_filter if country_filter != ALL_COUNTRIES_OPTION else "todos os países"
+    st.caption(f"{SESSION_TYPE_LABELS[session_type]} · {scope_label} · Época {year}")
+
+    top_drivers = tally_wins(
+        [(t.session_results, t.drivers) for t in tracks_data if t.session is not None]
+    )
+
+    if not top_drivers:
+        st.info("Sem vitórias registadas para os filtros selecionados.")
+    else:
+        top_drivers_df = top_drivers_to_dataframe(top_drivers)
+        chart = (
+            alt.Chart(top_drivers_df)
+            .mark_bar(cornerRadiusEnd=6)
+            .encode(
+                y=alt.Y("driver_name:N", sort="-x", title=None),
+                x=alt.X("wins:Q", title="Vitórias", axis=alt.Axis(tickMinStep=1)),
+                color=alt.Color(
+                    "driver_name:N",
+                    legend=None,
+                    scale=alt.Scale(range=["#ff8fa3", "#ffc785", "#7fd1ff"]),
+                ),
+                tooltip=[
+                    alt.Tooltip("driver_name:N", title="Piloto"),
+                    alt.Tooltip("team_name:N", title="Equipa"),
+                    alt.Tooltip("wins:Q", title="Vitórias"),
+                ],
+            )
+        )
+        labels = (
+            alt.Chart(top_drivers_df)
+            .mark_text(align="left", dx=6, fontWeight="bold")
+            .encode(
+                y=alt.Y("driver_name:N", sort="-x"),
+                x=alt.X("wins:Q"),
+                text=alt.Text("wins:Q"),
+            )
+        )
+        st.altair_chart(chart + labels, width="stretch")
+
+with st.container(border=True, key="tracks_card"):
     st.markdown("**Pistas da época**")
     st.dataframe(
         meetings_to_dataframe(filtered_meetings),
@@ -149,87 +276,32 @@ with st.container(border=True):
         },
     )
 
-try:
-    sessions = load_sessions(selected_meeting.meeting_key)
-except OpenF1Error as exc:
-    st.error(f"Não foi possível carregar as sessões: {exc}")
-    st.stop()
+st.subheader(f"5 melhores voltas por pista — {SESSION_TYPE_LABELS[session_type]}")
 
-if not sessions:
-    st.info("Não há sessões registadas para esta pista.")
-    st.stop()
+for track in tracks_data:
+    with st.container(border=True, key=f"laps_card_{track.meeting.meeting_key}"):
+        st.markdown(f"**{track.meeting.meeting_name} — {track.meeting.country_name}**")
 
-session_labels = [s.session_name for s in sessions]
-sessions_by_label = dict(zip(session_labels, sessions, strict=True))
+        if track.error:
+            st.error(f"Não foi possível carregar os dados desta pista: {track.error}")
+            continue
 
-with st.sidebar:
-    session_label = st.selectbox(
-        "Sessão",
-        options=session_labels,
-        index=default_session_index(sessions),
-    )
+        if track.session is None:
+            st.info(
+                f"Sem sessão de {SESSION_TYPE_LABELS[session_type].lower()} "
+                "registada para esta pista."
+            )
+            continue
 
-selected_session = sessions_by_label[session_label]
+        if track.session.date_start:
+            st.caption(f"{track.session.session_name} · Início: {track.session.date_start}")
 
-st.subheader(f"{selected_meeting.meeting_name} — {selected_session.session_name}")
-if selected_session.date_start:
-    st.caption(f"Início: {selected_session.date_start}")
+        if not track.ranked_laps:
+            st.warning("Nenhuma volta válida encontrada para esta sessão.")
+            continue
 
-try:
-    drivers = load_drivers(selected_session.session_key)
-    laps = load_laps(selected_session.session_key)
-except OpenF1Error as exc:
-    st.error(f"Não foi possível carregar os dados de volta: {exc}")
-    st.stop()
-
-ranked = rank_fastest_laps(laps, drivers)
-
-if not ranked:
-    st.warning("Nenhuma volta válida encontrada para esta sessão. Tente outra sessão ou pista.")
-    st.stop()
-
-df = ranked_laps_to_dataframe(ranked)
-
-with st.container(border=True):
-    st.markdown("**Top 5 voltas mais rápidas**")
-    st.dataframe(
-        df,
-        hide_index=True,
-        column_config={
-            "position": st.column_config.NumberColumn("Pos."),
-            "label": None,
-            "driver_name": st.column_config.TextColumn("Piloto"),
-            "team_name": st.column_config.TextColumn("Equipa"),
-            "driver_number": st.column_config.NumberColumn("Número"),
-            "lap_number": st.column_config.NumberColumn("Volta"),
-            "lap_duration": None,
-            "lap_duration_formatted": st.column_config.TextColumn("Tempo"),
-            "sector_1": st.column_config.TextColumn("Setor 1"),
-            "sector_2": st.column_config.TextColumn("Setor 2"),
-            "sector_3": st.column_config.TextColumn("Setor 3"),
-        },
-    )
-
-with st.container(border=True):
-    st.markdown("**Comparação visual**")
-    min_time = df["lap_duration"].min()
-    max_time = df["lap_duration"].max()
-    padding = max((max_time - min_time) * 0.5, 0.05)
-    chart = (
-        alt.Chart(df)
-        .mark_bar()
-        .encode(
-            y=alt.Y("label:N", sort=df["label"].tolist(), title=None),
-            x=alt.X(
-                "lap_duration:Q",
-                title="Tempo de volta (s)",
-                scale=alt.Scale(domain=[max(min_time - padding, 0), max_time + padding]),
-            ),
-            tooltip=[
-                alt.Tooltip("driver_name:N", title="Piloto"),
-                alt.Tooltip("team_name:N", title="Equipa"),
-                alt.Tooltip("lap_duration_formatted:N", title="Tempo"),
-            ],
+        st.dataframe(
+            ranked_laps_to_dataframe(track.ranked_laps),
+            hide_index=True,
+            column_config=LAPS_COLUMN_CONFIG,
         )
-    )
-    st.altair_chart(chart)

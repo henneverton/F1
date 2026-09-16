@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
-from f1.models import Driver, Lap, RankedLap
+from dataclasses import dataclass
+
+from f1.models import Driver, Lap, RankedLap, SessionResult
 
 TOP_N = 5
+TOP_DRIVERS_N = 3
+
+
+@dataclass(frozen=True, slots=True)
+class DriverWinTally:
+    """Contagem de vitórias (posição 1) de um piloto num conjunto de sessões."""
+
+    driver_number: int
+    driver_name: str
+    team_name: str
+    wins: int
 
 
 def format_lap_duration(seconds: float) -> str:
@@ -51,3 +64,46 @@ def rank_fastest_laps(
         )
 
     return ranked
+
+
+def tally_wins(
+    sessions_data: list[tuple[list[SessionResult], list[Driver]]], top_n: int = TOP_DRIVERS_N
+) -> list[DriverWinTally]:
+    """Conta vitórias (posição 1) por piloto num conjunto de sessões e devolve o top.
+
+    Cada item de `sessions_data` é um par (classificação, pilotos) de uma
+    sessão. Em caso de empate no número de vitórias, o desempate é feito por
+    nome do piloto, para um resultado determinístico.
+    """
+
+    drivers_by_number: dict[int, Driver] = {}
+    wins_by_number: dict[int, int] = {}
+
+    for results, drivers in sessions_data:
+        for driver in drivers:
+            drivers_by_number.setdefault(driver.driver_number, driver)
+        for result in results:
+            if result.position == 1:
+                wins_by_number[result.driver_number] = (
+                    wins_by_number.get(result.driver_number, 0) + 1
+                )
+
+    tallies = [
+        DriverWinTally(
+            driver_number=number,
+            driver_name=(
+                drivers_by_number[number].full_name
+                if number in drivers_by_number
+                else f"Piloto #{number}"
+            ),
+            team_name=(
+                drivers_by_number[number].team_name
+                if number in drivers_by_number and drivers_by_number[number].team_name
+                else "Desconhecida"
+            ),
+            wins=wins,
+        )
+        for number, wins in wins_by_number.items()
+    ]
+
+    return sorted(tallies, key=lambda t: (-t.wins, t.driver_name))[:top_n]

@@ -51,6 +51,17 @@ class Lap:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionResult:
+    """A classificação final de um piloto numa sessão (posição, DNF, etc.)."""
+
+    driver_number: int
+    position: int | None
+    dnf: bool = False
+    dns: bool = False
+    dsq: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class RankedLap:
     """Um item do ranking das voltas mais rápidas, pronto para exibição."""
 
