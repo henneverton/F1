@@ -6,12 +6,14 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from f1.models import RankedLap
+from f1.geo import build_calendar_map
+from f1.models import Meeting, RankedLap
 from f1.openf1_client import OpenF1Client, OpenF1Error
 from f1.ranking import rank_fastest_laps
 
 MIN_YEAR = 2023
 CURRENT_YEAR = 2026
+ALL_COUNTRIES_OPTION = "Todos os países"
 
 
 @st.cache_resource
@@ -61,6 +63,17 @@ def ranked_laps_to_dataframe(ranked: list[RankedLap]) -> pd.DataFrame:
     )
 
 
+def meetings_to_dataframe(meetings: list[Meeting]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "meeting_name": [m.meeting_name for m in meetings],
+            "circuit_short_name": [m.circuit_short_name for m in meetings],
+            "country_name": [m.country_name for m in meetings],
+            "date": [m.date_start.split("T")[0] if m.date_start else "-" for m in meetings],
+        }
+    )
+
+
 def default_session_index(sessions: list) -> int:
     for index, session in enumerate(sessions):
         if session.session_type.lower() == "race":
@@ -93,12 +106,48 @@ if not meetings:
     st.info("Não há Grandes Prémios registados para esta época.")
     st.stop()
 
-meetings_by_label = {f"{m.meeting_name} — {m.country_name}": m for m in meetings}
+countries = sorted({m.country_name for m in meetings if m.country_name})
+
+with st.sidebar:
+    country_filter = st.selectbox("País", options=[ALL_COUNTRIES_OPTION, *countries])
+
+filtered_meetings = (
+    meetings
+    if country_filter == ALL_COUNTRIES_OPTION
+    else [m for m in meetings if m.country_name == country_filter]
+)
+filtered_meetings = sorted(filtered_meetings, key=lambda m: m.date_start or "")
+
+if not filtered_meetings:
+    st.info("Não há Grandes Prémios registados para este país nesta época.")
+    st.stop()
+
+meetings_by_label = {f"{m.meeting_name} — {m.country_name}": m for m in filtered_meetings}
 
 with st.sidebar:
     meeting_label = st.selectbox("Pista / Grande Prémio", options=list(meetings_by_label))
 
 selected_meeting = meetings_by_label[meeting_label]
+
+with st.container(border=True):
+    st.markdown("**Mapa do calendário**")
+    st.altair_chart(
+        build_calendar_map([m.country_name for m in meetings], selected_meeting.country_name),
+        width="stretch",
+    )
+
+with st.container(border=True):
+    st.markdown("**Pistas da época**")
+    st.dataframe(
+        meetings_to_dataframe(filtered_meetings),
+        hide_index=True,
+        column_config={
+            "meeting_name": st.column_config.TextColumn("Grande Prémio"),
+            "circuit_short_name": st.column_config.TextColumn("Circuito"),
+            "country_name": st.column_config.TextColumn("País"),
+            "date": st.column_config.TextColumn("Data"),
+        },
+    )
 
 try:
     sessions = load_sessions(selected_meeting.meeting_key)

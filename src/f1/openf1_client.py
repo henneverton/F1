@@ -57,6 +57,11 @@ class OpenF1Client:
         except httpx.HTTPError as exc:
             raise OpenF1Error(f"Falha de rede ao consultar {path}: {exc}") from exc
 
+        if response.status_code == 404:
+            # A OpenF1 API responde 404 (em vez de 200 com lista vazia) quando o
+            # filtro não corresponde a nenhum registo — não é um erro real.
+            return []
+
         if response.status_code >= 400:
             raise OpenF1HTTPError(
                 f"OpenF1 respondeu {response.status_code} para {path}: {response.text}"
