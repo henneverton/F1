@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
 
-from f1.models import Driver, Lap, Meeting, Session
+from f1.models import Driver, Lap, Meeting, Session, SessionResult
 
 BASE_URL = "https://api.openf1.org/v1"
 DEFAULT_TIMEOUT = 10.0
+
+# A OpenF1 API limita a 3 pedidos/segundo; abaixo disso evitamos 429s quando o
+# dashboard percorre várias pistas seguidas (uma pista = até 3 pedidos).
+MIN_REQUEST_INTERVAL = 0.4
+MAX_RATE_LIMIT_RETRIES = 3
 
 
 class OpenF1Error(Exception):
@@ -39,6 +45,7 @@ class OpenF1Client:
     ) -> None:
         self._base_url = base_url
         self._client = client or httpx.Client(base_url=base_url, timeout=timeout)
+        self._last_request_at: float = 0.0
 
     def close(self) -> None:
         self._client.close()
@@ -49,13 +56,32 @@ class OpenF1Client:
     def __exit__(self, *_exc_info: object) -> None:
         self.close()
 
-    def _get(self, path: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+    def _throttle(self) -> None:
+        elapsed = time.monotonic() - self._last_request_at
+        if elapsed < MIN_REQUEST_INTERVAL:
+            time.sleep(MIN_REQUEST_INTERVAL - elapsed)
+
+    def _send(self, path: str, params: dict[str, Any]) -> httpx.Response:
+        self._throttle()
         try:
             response = self._client.get(path, params=params)
         except httpx.TimeoutException as exc:
             raise OpenF1TimeoutError(f"Tempo limite ao consultar {path}") from exc
         except httpx.HTTPError as exc:
             raise OpenF1Error(f"Falha de rede ao consultar {path}: {exc}") from exc
+        finally:
+            self._last_request_at = time.monotonic()
+        return response
+
+    def _get(self, path: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        response = self._send(path, params)
+
+        for _ in range(MAX_RATE_LIMIT_RETRIES):
+            if response.status_code != 429:
+                break
+            retry_after = float(response.headers.get("Retry-After", 1.0))
+            time.sleep(retry_after)
+            response = self._send(path, params)
 
         if response.status_code == 404:
             # A OpenF1 API responde 404 (em vez de 200 com lista vazia) quando o
@@ -111,6 +137,19 @@ class OpenF1Client:
                 driver_number=item["driver_number"],
                 full_name=item.get("full_name") or item.get("broadcast_name", "Desconhecido"),
                 team_name=item.get("team_name"),
+            )
+            for item in raw
+        ]
+
+    def get_session_results(self, session_key: int | str) -> list[SessionResult]:
+        raw = self._get("/session_result", {"session_key": session_key})
+        return [
+            SessionResult(
+                driver_number=item["driver_number"],
+                position=item.get("position"),
+                dnf=bool(item.get("dnf", False)),
+                dns=bool(item.get("dns", False)),
+                dsq=bool(item.get("dsq", False)),
             )
             for item in raw
         ]

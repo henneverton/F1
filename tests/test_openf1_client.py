@@ -81,6 +81,19 @@ def test_get_laps_success():
     assert laps[0].lap_duration == 91.234
 
 
+def test_get_session_results_success():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert dict(request.url.params) == {"session_key": "9168"}
+        return httpx.Response(200, json=_load_fixture("session_result.json"))
+
+    client = _client_with_handler(handler)
+    results = client.get_session_results(9168)
+
+    assert len(results) == 3
+    assert results[0].driver_number == 1
+    assert results[0].position == 1
+
+
 def test_empty_result_returns_empty_list():
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=[])
@@ -97,6 +110,44 @@ def test_not_found_returns_empty_list():
     client = _client_with_handler(handler)
 
     assert client.get_laps(9168) == []
+
+
+def test_rate_limit_retries_then_succeeds(monkeypatch):
+    from f1 import openf1_client as openf1_client_module
+
+    monkeypatch.setattr(openf1_client_module.time, "sleep", lambda _seconds: None)
+
+    calls = {"count": 0}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] < 3:
+            return httpx.Response(
+                429,
+                headers={"Retry-After": "0"},
+                json={"detail": "Rate limit exceeded."},
+            )
+        return httpx.Response(200, json=_load_fixture("laps.json"))
+
+    client = _client_with_handler(handler)
+    laps = client.get_laps(9168)
+
+    assert calls["count"] == 3
+    assert len(laps) == 5
+
+
+def test_rate_limit_raises_after_exhausting_retries(monkeypatch):
+    from f1 import openf1_client as openf1_client_module
+
+    monkeypatch.setattr(openf1_client_module.time, "sleep", lambda _seconds: None)
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "0"}, json={"detail": "Rate limit"})
+
+    client = _client_with_handler(handler)
+
+    with pytest.raises(OpenF1HTTPError):
+        client.get_laps(9168)
 
 
 def test_http_error_raises_openf1_http_error():

@@ -1,0 +1,26 @@
+[
+  {
+    "position": 1,
+    "driver_number": 1,
+    "points": 25.0,
+    "dnf": false,
+    "dns": false,
+    "dsq": false
+  },
+  {
+    "position": 2,
+    "driver_number": 16,
+    "points": 18.0,
+    "dnf": false,
+    "dns": false,
+    "dsq": false
+  },
+  {
+    "position": 3,
+    "driver_number": 44,
+    "points": 15.0,
+    "dnf": false,
+    "dns": false,
+    "dsq": false
+  }
+]

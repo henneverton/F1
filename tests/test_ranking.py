@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from f1.models import Driver, Lap
-from f1.ranking import format_lap_duration, rank_fastest_laps
+from f1.models import Driver, Lap, SessionResult
+from f1.ranking import format_lap_duration, rank_fastest_laps, tally_wins
 
 DRIVERS = [
     Driver(driver_number=1, full_name="Max Verstappen", team_name="Red Bull Racing"),
@@ -107,3 +107,61 @@ def test_unknown_driver_falls_back_to_generic_label():
 
 def test_empty_laps_returns_empty_ranking():
     assert rank_fastest_laps([], DRIVERS) == []
+
+
+def _win(driver_number: int) -> SessionResult:
+    return SessionResult(driver_number=driver_number, position=1)
+
+
+def _second(driver_number: int) -> SessionResult:
+    return SessionResult(driver_number=driver_number, position=2)
+
+
+def test_tally_wins_counts_position_one_across_sessions():
+    sessions_data = [
+        ([_win(1), _second(16)], DRIVERS),
+        ([_win(1), _second(44)], DRIVERS),
+        ([_win(16), _second(1)], DRIVERS),
+    ]
+
+    top = tally_wins(sessions_data)
+
+    assert top[0].driver_name == "Max Verstappen"
+    assert top[0].wins == 2
+    assert top[1].driver_name == "Charles Leclerc"
+    assert top[1].wins == 1
+
+
+def test_tally_wins_respects_top_n():
+    sessions_data = [
+        ([_win(1)], DRIVERS),
+        ([_win(16)], DRIVERS),
+        ([_win(44)], DRIVERS),
+        ([_win(63)], DRIVERS),
+    ]
+
+    top = tally_wins(sessions_data, top_n=3)
+
+    assert len(top) == 3
+
+
+def test_tally_wins_ties_broken_by_driver_name():
+    sessions_data = [
+        ([_win(16)], DRIVERS),
+        ([_win(1)], DRIVERS),
+    ]
+
+    top = tally_wins(sessions_data)
+
+    assert [t.driver_name for t in top] == ["Charles Leclerc", "Max Verstappen"]
+
+
+def test_tally_wins_unknown_driver_falls_back_to_generic_label():
+    top = tally_wins([([_win(99)], DRIVERS)])
+
+    assert top[0].driver_name == "Piloto #99"
+    assert top[0].team_name == "Desconhecida"
+
+
+def test_tally_wins_no_results_returns_empty_list():
+    assert tally_wins([]) == []
